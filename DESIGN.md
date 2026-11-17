@@ -56,10 +56,8 @@ Each office's budget is checked in its own currency; currencies are converted on
 
 - **Ask one person at a time, not the whole group.** Slower in the worst case, but a broadcast is exactly the "someone else will do it" failure we have today. Open step-in keeps goodwill possible.
 - **Budget is checked twice, and the second check does not refuse.** Before asking, so nobody shops with no budget; at receipt, where an overspend goes to a human, because the volunteer has already paid.
-- **Presence is a hint.** If it is wrong, the 2-hour timeout corrects it. I did not build a precise attendance source.
 - **No reservation of budget at commit.** One active refill per office makes it unnecessary.
 - **In-memory store and one lock.** Enough to prove the rules. In production the same rule is a conditional database update plus a unique index on active refills per office.
-- **HR claims are not idempotent.** HR accepts only five fields, so a timeout after HR has accepted a claim could produce a duplicate on retry. I would ask HR for a lookup or idempotency key.
 
 ## Deliberately not built
 
@@ -70,6 +68,16 @@ Each office's budget is checked in its own currency; currencies are converted on
 - **Live exchange rates.** One agreed rate per month is reproducible and auditable.
 - **Quiet hours, public holidays, manual cancel of a false report.** Needed before real use; small, and they do not change the design.
 
-## Assumptions (questions sent to the team)
+## Assumptions
 
-Reporting currency is NOK with one finance-supplied rate per month; HR accepts a claim in the purchase currency and converts to payroll currency; any employee may report an empty box; visiting volunteers may buy; an office admin exists who can approve overspend; budgets do not roll over.
+I asked the team these questions; they asked me to choose and state reasonable assumptions. Each is chosen so that being wrong costs a small change, not a redesign.
+
+| Assumption | Why | If wrong |
+|---|---|---|
+| **Report in NOK, at one finance-supplied rate per month.** | Management sits in Oslo. A fixed rate makes the report reproducible and auditable; a live rate changes the past. | No code change: currency and rates are report inputs. |
+| **Claims are filed in the purchase currency; HR converts to payroll currency.** | The claim then matches the receipt, which is what HR checks. The brief implies HR already converts. | Convert before filing. |
+| **HR status can be polled; there is no idempotency key.** | Status is needed to tell people they are paid. The brief lists only five claim fields, so I assume the worse case: a retry after a timeout could duplicate a claim, which HR approval would catch. | No status: buyer confirms in chat. A key removes the duplicate risk. |
+| **The budget is soft (overspend goes to an admin) and does not roll over.** | The volunteer has already paid, so refusing punishes the wrong person; the cap in each offer prevents most overspends. No rollover keeps months independent and avoids spending leftovers for their own sake. | Hard limit: auto-reject. Rollover: add last month's remainder. |
+| **Each office has an admin** who approves overspends and gets escalations. | Someone must own exceptions; the brief names nobody. | Send to a group channel. |
+| **Anyone may report an empty box; visiting volunteers may refill where they are, charged to that office.** | Whoever notices is usually eating, not volunteering, and a repeat report just joins the running refill. A visitor is at the counter, which is what matters. | One eligibility check. |
+| **Office presence is a rough hint** (desk booking, calendar or chat status). | Hybrid work makes every source imperfect, and the 2-hour deadline corrects a wrong hint. | A reliable source only improves the first ask. |
