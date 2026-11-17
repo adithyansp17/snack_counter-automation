@@ -1,0 +1,13 @@
+[project]
+name = "snack-counter"
+version = "0.1.0"
+description = "Snack counter refill automation: core logic with simulated chat and HR systems"
+requires-python = ">=3.9"
+dependencies = ["tzdata"]   # time zone data for Windows; harmless elsewhere
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

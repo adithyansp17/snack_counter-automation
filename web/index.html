@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snack Counter</title>
+<style>
+  :root { --ink:#1c2733; --muted:#637083; --line:#dfe4ea; --bg:#f4f6f8; --card:#fff;
+          --accent:#1f5f8b; --ok:#1e7d4f; --warn:#b26a00; --bad:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--accent); color:#fff; padding:12px 20px; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; }
+  header h1 { font-size:18px; margin:0; }
+  header .clock { font-weight:600; }
+  header .spacer { flex:1; }
+  header button { background:#fff; color:var(--accent); border:0; }
+  main { max-width:1200px; margin:0 auto; padding:16px 20px 40px; display:grid; gap:16px; grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  @media (max-width:820px) { main { grid-template-columns:1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; min-width:0; }
+  section.wide { grid-column:1 / -1; }
+  h2 { font-size:15px; margin:0 0 8px; }
+  h3 { font-size:13px; margin:12px 0 6px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  p { margin:6px 0; }
+  .muted { color:var(--muted); }
+  button { font:inherit; padding:5px 10px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--accent); }
+  button.danger { border-color:var(--bad); background:#fff; color:var(--bad); }
+  select, input { font:inherit; padding:4px 6px; border:1px solid var(--line); border-radius:6px; max-width:100%; }
+  input.amount { width:110px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; margin:6px 0; }
+  .bar > div { height:100%; background:var(--ok); }
+  .bar.over > div { background:var(--bad); }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; background:var(--line); }
+  .tag.offered, .tag.open { background:#fff1d6; color:var(--warn); }
+  .tag.committed, .tag.purchased, .tag.claimed, .tag.pending { background:#dcebf7; color:var(--accent); }
+  .tag.reimbursed, .tag.approved { background:#dcf3e6; color:var(--ok); }
+  .tag.rejected, .tag.blocked_budget, .tag.needs_approval { background:#fbe0de; color:var(--bad); }
+  .box { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-top:10px; background:#fafbfc; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  #error { display:none; max-width:1200px; margin:12px auto 0; padding:10px 14px; border-radius:6px; background:#fbe0de; color:var(--bad); font-weight:600; }
+  .chat { max-height:320px; overflow-y:auto; }
+  .chat div { padding:5px 0; border-bottom:1px solid var(--line); }
+  .chat b { color:var(--accent); }
+  details summary { cursor:pointer; color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Snack Counter</h1>
+  <span class="clock" id="clock"></span>
+  <span class="spacer"></span>
+  <span>Move time forward:</span>
+  <button data-act="advance" data-hours="1">+1 hour</button>
+  <button data-act="advance" data-hours="2">+2 hours</button>
+  <button data-act="advance" data-hours="24">+1 day</button>
+  <button data-act="advance" data-hours="264">+11 days</button>
+  <button data-act="advance" data-hours="744">+31 days</button>
+  <button data-act="reset">Reset</button>
+</header>
+<div id="error"></div>
+<main>
+  <section id="office-OSL"></section>
+  <section id="office-BLR"></section>
+  <section id="people"></section>
+  <section id="chat"></section>
+  <section id="hr"></section>
+  <section id="report"></section>
+  <section id="log" class="wide"></section>
+</main>
+
+<script>
+"use strict";
+let S = null;
+const ACTIVE = ["open", "offered", "committed", "blocked_budget"];
+const NAMES = { OSL: "Oslo", BLR: "Bengaluru" };
+
+function esc(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function val(id) { const el = document.getElementById(id); return el ? el.value : ""; }
+function tag(state) { return '<span class="tag ' + esc(state) + '">' + esc(state.replace(/_/g, " ")) + "</span>"; }
+function options(people) {
+  return people.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + " (" + esc(p.id) + ")</option>").join("");
+}
+function presentVolunteers(office, except) {
+  return S.people.filter(p => p.volunteer && p.location === office && p.id !== except);
+}
+
+async function load() {
+  const response = await fetch("/api/state");
+  S = await response.json();
+  render();
+}
+async function act(action) {
+  const response = await fetch("/api/action", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+  const data = await response.json();
+  S = data.state;
+  const box = document.getElementById("error");
+  box.textContent = data.error || "";
+  box.style.display = data.error ? "block" : "none";
+  render();
+}
+
+function renderOffice(o) {
+  const used = Math.max(0, Math.min(100, 100 * Number(o.spent) / Number(o.budget)));
+  let html = "<h2>" + esc(NAMES[o.code] || o.code) + " counter</h2>" +
+    '<p class="muted">Local time ' + esc(o.local_time) + " &middot; budget month " + esc(o.month) + "</p>" +
+    "<p><b>" + esc(o.spent) + "</b> of " + esc(o.budget) + " " + esc(o.currency) + " spent &middot; <b>" +
+    esc(o.remaining) + "</b> " + esc(o.currency) + " left</p>" +
+    '<div class="bar' + (Number(o.remaining) < 0 ? " over" : "") + '"><div style="width:' + used + '%"></div></div>';
+
+  const r = S.refills.find(x => x.office === o.code && ACTIVE.includes(x.state));
+  html += '<div class="box">';
+  if (!r) {
+    const here = S.people.filter(p => p.location === o.code);
+    html += "<p>The box is stocked. No refill in progress.</p>";
+    html += here.length
+      ? '<div class="row"><select id="rep-' + o.code + '">' + options(here) + "</select>" +
+        '<button data-act="report" data-office="' + o.code + '">reports the box empty</button></div>'
+      : '<p class="muted">Nobody is in this office to report it.</p>';
+  } else {
+    html += "<p>Refill <b>" + esc(r.id) + "</b> " + tag(r.state) + " reported by " + esc(r.reported_by) + "</p>";
+    const others = presentVolunteers(o.code, r.offered_to);
+    const stepIn = others.length
+      ? '<div class="row"><span class="muted">Or another volunteer steps in:</span><select id="who-' + r.id + '">' +
+        options(others) + '</select><button class="ghost" data-act="commit_pick" data-refill="' + r.id + '">commits</button></div>'
+      : "";
+    if (r.state === "offered") {
+      html += "<p><b>" + esc(r.offered_to) + "</b> has been asked (up to " + esc(r.cap) + " " + esc(o.currency) +
+        "). Answer due " + esc(r.offer_expires_at) + ", then it passes to the next volunteer.</p>" +
+        '<div class="row"><button data-act="commit" data-refill="' + r.id + '" data-employee="' + esc(r.offered_to) + '">' +
+        esc(r.offered_to) + ' says yes</button><button class="danger" data-act="decline" data-refill="' + r.id +
+        '" data-employee="' + esc(r.offered_to) + '">' + esc(r.offered_to) + " says no</button></div>" + stepIn;
+    } else if (r.state === "committed") {
+      html += "<p><b>" + esc(r.committed_by) + "</b> is buying (up to " + esc(r.cap) + " " + esc(o.currency) +
+        "). Receipt due " + esc(r.purchase_deadline) + ".</p>" +
+        '<div class="row"><input class="amount" id="amt-' + r.id + '" placeholder="Amount ' + esc(o.currency) + '" inputmode="decimal">' +
+        '<input id="items-' + r.id + '" placeholder="Items (optional, comma separated)">' +
+        '<button data-act="purchase" data-refill="' + r.id + '" data-employee="' + esc(r.committed_by) + '">submits receipt</button>' +
+        '<button class="danger" data-act="decline" data-refill="' + r.id + '" data-employee="' + esc(r.committed_by) + '">backs out</button></div>';
+    } else if (r.state === "open") {
+      html += "<p>No volunteer could take it. The office channel has been told; the bot asks again at " +
+        esc(r.retry_at) + ".</p>" + (stepIn || '<p class="muted">No volunteer is in this office right now. Change someone\'s location under People, or move time forward.</p>');
+    } else {
+      html += "<p>Less than " + esc(o.min_purchase) + " " + esc(o.currency) +
+        " of this month's budget is left, so nobody is asked to buy. It resumes when the next month starts.</p>";
+    }
+    if (r.state === "open" || r.state === "blocked_budget") html = html.replace("Or another volunteer steps in:", "A volunteer claims it:");
+  }
+  html += "</div>";
+
+  const waiting = S.refills.filter(x => x.office === o.code && x.state === "needs_approval");
+  for (const x of waiting) {
+    html += '<div class="box"><p>' + tag(x.state) + " <b>" + esc(x.buyer) + "</b> spent " + esc(x.amount) + " " + esc(x.currency) +
+      ", more than the budget that was left. Admin <b>" + esc(o.admin) + "</b> decides:</p>" +
+      '<div class="row"><button data-act="approve_overage" data-refill="' + x.id + '">Approve</button>' +
+      '<button class="danger" data-act="reject_overage" data-refill="' + x.id + '">Reject</button></div></div>';
+  }
+  document.getElementById("office-" + o.code).innerHTML = html;
+}
+
+function renderPeople() {
+  let html = "<h2>People</h2><p class=\"muted\">Only volunteers who are in an office today are asked to refill it.</p>" +
+    '<div class="scroll"><table><tr><th>Person</th><th>Home</th><th>Volunteer</th><th>Where today</th></tr>';
+  for (const p of S.people) {
+    const choices = [["OSL", "Oslo office"], ["BLR", "Bengaluru office"], ["", "Home / holiday"]];
+    html += "<tr><td>" + esc(p.name) + ' <span class="muted">' + esc(p.id) + "</span></td><td>" + esc(p.home) + "</td><td>" +
+      (p.volunteer ? "Yes" : "No") + '</td><td><select data-presence="' + esc(p.id) + '">' +
+      choices.map(c => '<option value="' + c[0] + '"' + ((p.location || "") === c[0] ? " selected" : "") + ">" + c[1] + "</option>").join("") +
+      "</select></td></tr>";
+  }
+  document.getElementById("people").innerHTML = html + "</table></div>";
+}
+
+function renderChat() {
+  let html = "<h2>Chat tool (simulated)</h2>";
+  html += S.chat.length ? '<div class="chat">' + S.chat.map(m =>
+      '<div><span class="muted">' + esc(m.time) + "</span> to <b>" + esc(m.to) + "</b><br>" + esc(m.text) + "</div>").join("") + "</div>"
+    : '<p class="muted">No messages yet. Report a box empty to start.</p>';
+  document.getElementById("chat").innerHTML = html;
+}
+
+function renderHR() {
+  let html = "<h2>HR system (simulated)</h2><div class=\"row\">" +
+    (S.hr_down
+      ? '<span class="tag rejected">offline</span><button class="ghost" data-act="hr_down" data-down="0">Bring HR back online</button>'
+      : '<span class="tag approved">online</span><button class="ghost" data-act="hr_down" data-down="1">Take HR offline</button>') + "</div>";
+  if (!S.claims.length) {
+    html += '<p class="muted">No claims yet. A claim is created automatically when a receipt is submitted.</p>';
+  } else {
+    html += '<div class="scroll"><table><tr><th>Claim</th><th>Employee</th><th class="num">Amount</th><th>Status</th><th></th></tr>';
+    for (const c of S.claims) {
+      html += "<tr><td>" + esc(c.id) + '<br><span class="muted">' + esc(c.description) + "</span></td><td>" + esc(c.employee) +
+        '</td><td class="num">' + esc(c.amount) + " " + esc(c.currency) + "</td><td>" + tag(c.status) + "</td><td>" +
+        (c.status === "pending"
+          ? '<button data-act="hr_approve" data-claim="' + esc(c.id) + '">Approve</button> <button class="danger" data-act="hr_reject" data-claim="' + esc(c.id) + '">Reject</button>'
+          : "") + "</td></tr>";
+    }
+    html += "</table></div>";
+  }
+  document.getElementById("hr").innerHTML = html;
+}
+
+function renderReport() {
+  const r = S.report;
+  let html = "<h2>Monthly report for management: " + esc(r.month) + "</h2>" +
+    '<div class="scroll"><table><tr><th>Office</th><th class="num">Refills</th><th class="num">Spent</th><th class="num">Budget</th>' +
+    '<th class="num">Awaiting reimbursement</th><th class="num">Spent in ' + esc(r.reporting_currency) + "</th></tr>";
+  for (const code of Object.keys(r.offices)) {
+    const o = r.offices[code];
+    html += "<tr><td>" + esc(NAMES[code] || code) + '</td><td class="num">' + esc(o.refills) + '</td><td class="num">' + esc(o.spent) + " " +
+      esc(o.currency) + '</td><td class="num">' + esc(o.budget) + " " + esc(o.currency) + '</td><td class="num">' +
+      esc(o.awaiting_reimbursement) + " " + esc(o.currency) + '</td><td class="num">' + esc(o.spent_in_reporting_currency) + "</td></tr>";
+  }
+  html += '<tr><td colspan="5"><b>Total across both offices</b></td><td class="num"><b>' + esc(r.total) + " " +
+    esc(r.reporting_currency) + "</b></td></tr></table></div>" +
+    '<p class="muted">Rate used: ' + Object.keys(S.rates).map(k => "1 " + esc(k) + " = " + esc(S.rates[k]) + " " + esc(r.reporting_currency)).join(", ") + ".</p>";
+  document.getElementById("report").innerHTML = html;
+}
+
+function renderLog() {
+  let html = "<h2>All refills</h2>";
+  if (!S.refills.length) {
+    html += '<p class="muted">Nothing yet.</p>';
+  } else {
+    html += '<div class="scroll"><table><tr><th>Refill</th><th>Office</th><th>State</th><th>Buyer</th><th class="num">Amount</th><th>Claim</th><th>History</th></tr>';
+    for (const r of S.refills.slice().reverse()) {
+      html += "<tr><td>" + esc(r.id) + "</td><td>" + esc(r.office) + "</td><td>" + tag(r.state) + "</td><td>" + esc(r.buyer || "") +
+        '</td><td class="num">' + (r.amount ? esc(r.amount) + " " + esc(r.currency) : "") + "</td><td>" + esc(r.claim_id || "") +
+        "</td><td><details><summary>" + r.history.length + " steps</summary>" +
+        r.history.map(h => '<div><span class="muted">' + esc(h.time) + "</span> " + esc(h.state.replace(/_/g, " ")) + ": " + esc(h.note) + "</div>").join("") +
+        "</details></td></tr>";
+    }
+    html += "</table></div>";
+  }
+  document.getElementById("log").innerHTML = html;
+}
+
+function render() {
+  document.getElementById("clock").textContent = "Simulated time: " + S.now;
+  S.offices.forEach(renderOffice);
+  renderPeople(); renderChat(); renderHR(); renderReport(); renderLog();
+}
+
+document.addEventListener("click", event => {
+  const button = event.target.closest("button[data-act]");
+  if (!button) return;
+  const d = button.dataset;
+  const action = { type: d.act };
+  for (const key of ["office", "refill", "employee", "claim", "hours"]) {
+    if (d[key] !== undefined) action[key] = d[key];
+  }
+  if (d.act === "report") action.employee = val("rep-" + d.office);
+  if (d.act === "commit_pick") { action.type = "commit"; action.employee = val("who-" + d.refill); }
+  if (d.act === "purchase") { action.amount = val("amt-" + d.refill); action.items = val("items-" + d.refill); }
+  if (d.act === "hr_down") action.down = d.down === "1";
+  act(action);
+});
+document.addEventListener("change", event => {
+  const select = event.target.closest("select[data-presence]");
+  if (select) act({ type: "presence", employee: select.dataset.presence, location: select.value });
+});
+
+load();
+</script>
+</body>
+</html>
